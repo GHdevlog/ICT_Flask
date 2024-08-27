@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Image Prediction</title>
+</head>
+<body>
+    <h1>Upload Image for Prediction</h1>
+    <form id="upload-form" enctype="multipart/form-data">
+        <input type="file" id="file" name="file" accept="image/*" onchange="previewImage()">
+        <br><br>
+        <img id="image-preview" src="" alt="Image Preview" style="display: none; max-width: 300px; max-height: 300px;">
+        <br><br>
+        <button type="button" onclick="submitForm()">Predict</button>
+    </form>
+    <div id="result"></div>
+
+    <script>
+        function previewImage() {
+            var file = document.getElementById('file').files[0];
+            var reader = new FileReader();
+            reader.onload = function(event) {
+                var img = document.getElementById('image-preview');
+                img.src = event.target.result;
+                img.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function submitForm() {
+            var formData = new FormData();
+            var file = document.getElementById('file').files[0];
+            formData.append('file', file);
+
+            var xhr = new XMLHttpRequest();
+            xhr.open("POST", "/predict", true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    var result = JSON.parse(xhr.responseText);
+                    document.getElementById('result').innerText = 'Predictions: ' + result.predictions;
+                }
+            };
+            xhr.send(formData);
+        }
+    </script>
+</body>
+</html>
