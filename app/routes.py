@@ -5,6 +5,7 @@ import logging
 import firebase_admin
 from firebase_admin import credentials, firestore
 from werkzeug.utils import secure_filename
+import subprocess
 
 # Firebase Admin 초기화
 cred = credentials.Certificate('ict-flutter-app-firebase-adminsdk-4utx6-db54eaf7e4.json')
@@ -167,3 +168,54 @@ def get_media():
     else:
         return jsonify({'error': 'No media found for this pet'}), 404
 
+# 모델을 통한 반려동물 예측
+@main.route('/predict', methods=['POST'])
+def predict():
+    # 클라이언트 요청에서 'file' 키가 없는지 확인하고 에러 반환
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'})  # 에러 메시지 반환: 파일이 존재하지 않음
+    
+    # 클라이언트가 업로드한 파일을 변수에 저장
+    file = request.files['file']
+    
+    # 파일 이름이 없는 경우 (파일이 선택되지 않음) 에러 반환
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'})  # 에러 메시지 반환: 선택된 파일이 없음
+
+    # 업로드된 파일을 저장할 경로를 설정하고, 해당 경로에 파일을 저장
+    file_path = os.path.join('uploads', file.filename)
+    file.save(file_path)  # 업로드된 파일을 서버에 저장
+
+    # 이미지 전처리 수행을 위한 명령어 준비 (conda 환경을 이용하여 전처리 실행)
+    preprocess_command = ['conda', 'run', '-n', 'ict_preprocess', 'python', 'preprocessing/preprocess.py', file_path]
+    # 전처리 명령어 실행 (서브 프로세스로 실행하고 출력 결과를 캡처)
+    preprocess_result = subprocess.run(preprocess_command, capture_output=True, text=True)
+    
+    # 전처리 실행 결과가 실패한 경우 에러 반환
+    if preprocess_result.returncode != 0:
+        return jsonify({'error': 'Image preprocessing failed'})  # 전처리 실패 시 에러 메시지 반환
+
+    # 전처리된 이미지를 모델로 예측하는 명령어 준비 (conda 환경에서 예측 스크립트 실행)
+    output_path = os.path.join('outputs', 'predictions.json')  # 예측 결과가 저장될 파일 경로
+    predict_command = ['conda', 'run', '-n', 'ict', 'python', 'model/predict.py', 'preprocessed_image.npy', output_path]
+    # 예측 명령어 실행 (서브 프로세스로 실행하고 출력 결과를 캡처)
+    result = subprocess.run(predict_command, capture_output=True, text=True)
+    
+    # 예측 실행 결과가 실패한 경우 에러 반환
+    if result.returncode != 0:
+        return jsonify({'error': 'Model prediction failed'})  # 예측 실패 시 에러 메시지 반환
+
+    # 예측 결과 파일이 존재하는지 확인하고, 존재하지 않으면 에러 반환
+    if not os.path.exists(output_path):
+        return jsonify({'error': 'Prediction file not found'})  # 예측 결과 파일을 찾지 못한 경우 에러 메시지 반환
+
+    # 예측 결과 파일을 읽고 JSON 형식으로 반환
+    try:
+        with open(output_path, 'r') as f:
+            predictions = json.load(f)  # 예측 결과 파일을 읽고 JSON 파싱
+    except Exception as e:
+        # 파일을 읽는 과정에서 예외 발생 시 에러 메시지와 상세 내용 반환
+        return jsonify({'error': 'Failed to read prediction results', 'details': str(e)})
+
+    # 예측 결과를 클라이언트에 JSON 형식으로 반환
+    return jsonify({'predictions': predictions})
